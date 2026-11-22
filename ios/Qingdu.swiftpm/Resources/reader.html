@@ -1,0 +1,433 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="color-scheme" content="light dark">
+<title>清读阅读器</title>
+<!--
+  清读阅读器
+  - 在 App 里：由 Swift 调用 qingdu.load / qingdu.loadSample / qingdu.setT。
+  - 在浏览器里：直接双击打开，会显示示例须知，底部有调试栏（滑块、粘贴文字测试规则）。
+  要调整打标规则，改下面脚本里的 RULES。
+-->
+<style>
+:root {
+  --bg: #FFFFFF;
+  --label: #000000;
+  --label2: rgba(60,60,67,.6);
+  --sep: rgba(60,60,67,.18);
+  --fill: rgba(118,118,128,.12);
+  --blue: #007AFF;
+  --red: #FF3B30;
+  --paper: #F8F6EF;
+  --print-ink: #45403A;
+  --key-card: rgba(255,59,48,.08);
+  --time-chip: rgba(118,118,128,.14);
+  --sweep-blend: screen;
+  --ai1: #8D9FFF; --ai2: #BC82F3; --ai4: #FF6778; --ai5: #FFBA71;
+  --f-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  --f-print: "Songti SC", "STSong", "SimSun", "Noto Serif SC", serif;
+  --t: 0; --h: 0; --zoom: 1;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #000000; --label: #FFFFFF; --label2: rgba(235,235,245,.6); --sep: rgba(84,84,88,.6); --fill: rgba(118,118,128,.24);
+    --blue: #0A84FF; --red: #FF453A; --paper: #1B1A17; --print-ink: #B8B2A6;
+    --key-card: rgba(255,69,58,.16); --time-chip: rgba(118,118,128,.3); --sweep-blend: multiply;
+  }
+}
+@media (min-width: 700px) { :root { --zoom: 1.3; } }
+
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; min-height: 100vh;
+  background: var(--paper);
+  background: color-mix(in srgb, var(--bg) calc(var(--t) * 100%), var(--paper));
+  font-family: var(--f-sans); color: var(--label);
+  -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+#paper { max-width: 760px; margin: 0 auto; box-sizing: border-box; padding: 20px 22px 220px; }
+
+/* ---------- 文档：原样状态 ---------- */
+.doc {
+  font-family: var(--f-print);
+  font-size: calc((13px + 7px * var(--t)) * var(--zoom));
+  line-height: calc(1.55 + .3 * var(--t));
+  letter-spacing: calc(.05em * var(--t));
+  color: var(--label);
+  color: color-mix(in srgb, var(--label) calc(var(--t) * 100%), var(--print-ink));
+}
+.doc.sans { font-family: var(--f-sans); }
+.d-head { text-align: center; padding-bottom: .7em; margin-bottom: .9em; border-bottom: 1px solid var(--sep); }
+.doc.lines .d-head { text-align: left; border-bottom-color: transparent; padding-bottom: 0; }
+.d-org { margin: 0; font-size: .78em; letter-spacing: .15em; opacity: .7; }
+.d-title { margin: .2em 0 0; font-size: 1.38em; line-height: 1.35; font-weight: 700; letter-spacing: .06em; }
+.doc.lines .d-title { font-size: calc(1.38em + .14em * var(--h)); letter-spacing: .01em; }
+.d-h { margin: .8em 0 .1em; font-size: 1em; font-weight: 700; }
+.doc.lines .d-h { margin: 1.5em 0 .35em; font-size: .76em; font-weight: 600; letter-spacing: .08em; color: var(--label2); }
+.d-p { margin: 0 0 .3em; text-indent: 2em; }
+.w { display: inline-block; white-space: nowrap; text-indent: 0; }
+.s { border-radius: 14px; transition: opacity .45s ease, background-color .45s ease; }
+
+/* ---------- 分层：从「一句一行」开始，关键句变大、次要句退后 ---------- */
+.doc.lines .d-p { text-indent: 0; display: flex; flex-direction: column; gap: .55em; margin: 0; }
+.doc.lines .d-p .s { display: block; }
+.doc.lines .s.lo { opacity: calc(1 - .68 * var(--h)); font-size: calc(1em - .24em * var(--h)); line-height: calc(1.85 - .3 * var(--h)); }
+.doc.lines .s.lo.show { opacity: 1; }
+.doc.lines .s.key { font-size: calc(1em + .14em * var(--h)); }
+.doc.marks .s.key { font-weight: 500; background: var(--key-card); padding: .5em .7em; margin: .15em -.7em; }
+.mk { border-radius: 6px; transition: color .35s ease, background-color .35s ease, text-shadow .35s ease; }
+.doc.marks .k.neg .mk { color: var(--red); font-weight: 700; }
+.doc.marks .k.time .mk { font-weight: 600; background: var(--time-chip); padding: 0 .22em; margin: 0 .06em; font-variant-numeric: tabular-nums; }
+.doc.marks .k.item .mk { font-weight: 600; }
+.mk.found { color: var(--red); text-shadow: 0 0 14px color-mix(in srgb, var(--red) 55%, transparent); }
+.s.reading { background: color-mix(in srgb, var(--blue) 15%, transparent); }
+.s.ping { animation: ping 1.6s ease-out; }
+@keyframes ping { 0%, 40% { background: color-mix(in srgb, var(--blue) 18%, transparent); } 100% { background: transparent; } }
+
+/* ---------- 识别时的扫光 ---------- */
+.sweep {
+  position: fixed; left: 0; right: 0; top: 0; height: 260px; z-index: 5; pointer-events: none; opacity: 0;
+  mix-blend-mode: var(--sweep-blend);
+  background: linear-gradient(to bottom, transparent 0%, var(--ai1) 24%, var(--ai2) 42%, var(--ai4) 62%, var(--ai5) 80%, transparent 100%);
+}
+
+/* ---------- 浏览器调试栏（App 里不显示） ---------- */
+.dev {
+  position: fixed; left: 12px; right: 12px; bottom: 12px; z-index: 10; max-width: 560px; margin: 0 auto;
+  display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: 22px;
+  background: color-mix(in srgb, var(--bg) 80%, transparent); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  box-shadow: 0 8px 30px rgba(0,0,0,.12); font-size: 14px; -webkit-user-select: auto; user-select: auto;
+}
+.dev input[type=range] { flex: 1; min-width: 0; }
+.dev span, .dev button { white-space: nowrap; flex: none; }
+.dev button, .paste button { font: inherit; border: 0; border-radius: 99px; padding: 7px 14px; background: var(--blue); color: #fff; cursor: pointer; }
+.dev .ghost { background: var(--fill); color: var(--label); }
+.paste {
+  position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 16px;
+  background: rgba(0,0,0,.35);
+}
+.paste > div { width: min(640px, 100%); background: var(--bg); border-radius: 18px; padding: 18px; display: flex; flex-direction: column; gap: 12px; box-shadow: 0 20px 60px rgba(0,0,0,.3); }
+.paste p { margin: 0; font-size: 13px; color: var(--label2); }
+.paste textarea { width: 100%; min-height: 260px; box-sizing: border-box; font: 15px/1.6 var(--f-sans); padding: 10px; border-radius: 10px; border: 1px solid var(--sep); background: var(--bg); color: var(--label); -webkit-user-select: auto; user-select: auto; }
+.paste .row { display: flex; gap: 8px; justify-content: flex-end; }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div id="paper"><article class="doc" id="doc"></article></div>
+<div class="sweep" id="sweep"></div>
+
+<div class="dev" id="dev" hidden>
+  <span>调试</span>
+  <input id="devRange" type="range" min="0" max="1" step="0.001" value="0" aria-label="阅读辅助强度">
+  <button id="devPaste" type="button">测试一段文字</button>
+  <button id="devSample" type="button" class="ghost">示例</button>
+</div>
+<div class="paste" id="paste" hidden>
+  <div>
+    <strong>粘贴须知文字</strong>
+    <p>每段之间空一行。粘贴后点「识别」，看看规则标出的禁止词、时间和次要句对不对。</p>
+    <textarea id="pasteText" aria-label="须知文字"></textarea>
+    <div class="row"><button type="button" class="ghost" id="pasteCancel" style="background:var(--fill);color:var(--label)">取消</button><button type="button" id="pasteGo">识别</button></div>
+  </div>
+</div>
+
+<script src="gsap.min.js"></script>
+<script>
+"use strict";
+
+// ================= 打标规则（组员可以直接改这里） =================
+const RULES = {
+  // 文字识别常见错字 → 正确写法（识别后先替换，再打标）
+  fix: { "葯": "药", "無": "无", "禁止飲水": "禁止饮水" },
+  // 禁止 / 否定词。句子里只要出现一个，这句话就是「关键句」。长的写在前面会优先匹配。
+  neg: ["禁止饮水", "禁止进食", "禁止饮食", "不能驾车", "不能开车", "严禁", "禁止", "切勿", "切忌", "不要", "不能", "不可", "不得", "不宜", "避免", "暂停", "停用", "禁食", "禁水", "勿"],
+  // 要带的东西
+  items: ["既往检查报告", "检查报告", "身份证", "医保卡", "社保卡", "就诊卡", "病历本", "病历", "家属陪同", "银行卡", "户口本", "知情同意书"],
+  // 出现这些词的句子算「次要句」（问候、客套、免责声明等），会被缩小、淡化
+  minor: ["尊敬的", "您好", "感谢", "谢谢", "祝您", "欢迎", "最终解释权", "如有疑问", "如有任何疑问", "咨询电话", "为保证", "为了保证", "仔细阅读", "重要手段", "可适当", "即表示"],
+  // 时间的写法
+  time: [
+    /检查[前后]\s*[0-9一二两三四五六七八九十半]+\s*个?\s*(?:天|日|小时|分钟|周)/g,
+    /(?:提前|前|后)\s*[0-9一二两三四五六七八九十半]+\s*个?\s*(?:天|日|小时|分钟)/g,
+    /(?:当日|当天|前一天|前1天)?(?:早上|上午|中午|下午|晚上|凌晨|清晨|晨起)?\s*\d{1,2}[:：]\d{2}/g,
+    /(?:早上|上午|中午|下午|晚上|凌晨)\s*[0-9一二两三四五六七八九十]+\s*[点时](?:半|\d{1,2}分)?/g,
+    /\d{1,2}\s*月\s*\d{1,2}\s*日/g,
+  ],
+  // 小标题：「一、」「（二）」「3.」开头的短段落
+  heading: /^(?:[一二三四五六七八九十]+[、.．]|（[一二三四五六七八九十]+）|\(?\d{1,2}[)）、.．])/,
+  // 标题里常见的词；标题前面含这些机构词的短段落算落款单位
+  title: ["须知", "通知", "告知书", "告知", "说明", "指南", "注意事项"],
+  org: ["医院", "中心", "诊所", "卫生院", "门诊"],
+};
+
+// 示例须知（未打标的原文，和真实识别结果走同一套规则）
+const SAMPLE = [
+  "××医院　消化内镜中心",
+  "结肠镜检查前须知",
+  "尊敬的患者：您好！结肠镜检查是诊断肠道疾病的重要手段，检查效果很大程度上取决于肠道准备的质量。为保证检查顺利进行，请您仔细阅读以下内容并严格遵照执行。如肠道准备不充分，可能需要重新预约检查。",
+  "一、饮食准备",
+  "检查前3天开始进食低渣饮食，如白粥、面条、蒸蛋、豆腐等。不要吃蔬菜、水果及带籽食物（如火龙果、猕猴桃、西瓜）。检查前1天晚餐进食流质，20:00以后禁止进食，可少量饮用清水。",
+  "二、服用泻药",
+  "检查当日早上6:00开始服用聚乙二醇电解质散2盒，将药物溶于2000毫升温开水中，每15分钟饮用250毫升，在2小时内喝完。服药后可适当走动，以促进排便。排出清水样便即表示肠道准备合格。",
+  "三、用药注意",
+  "服用阿司匹林、氯吡格雷等抗凝或抗血小板药物者，请于检查前7天咨询医生是否需要停药，切勿自行停药或继续服用。高血压患者检查当日晨起可用少量清水服用降压药。糖尿病患者检查当日暂停口服降糖药及胰岛素。",
+  "四、检查当日",
+  "检查前2小时禁止饮水。请携带身份证、医保卡及既往检查报告，提前30分钟到达内镜中心候诊区签到。选择无痛检查者须有家属陪同，检查后当天不能驾车、高空作业或签署重要文件。",
+  "五、其他",
+  "如有任何疑问，请于工作日8:00—17:00拨打咨询电话。本须知最终解释权归本中心所有。",
+];
+
+// ================= 与 App 通信 =================
+const IN_APP = !!(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.qingdu);
+const post = (msg) => IN_APP ? window.webkit.messageHandlers.qingdu.postMessage(msg) : console.log("[qingdu]", msg);
+const RM = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const $ = (s) => document.querySelector(s);
+const doc = $("#doc"), sweepEl = $("#sweep");
+
+// ================= 规则：段落 → 结构 → 打标 =================
+const escRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const NEG_RE = new RegExp(RULES.neg.map(escRe).join("|"), "g");
+const ITEM_RE = new RegExp(RULES.items.map(escRe).join("|"), "g");
+const PRIORITY = { n: 0, t: 1, i: 2 };
+
+// 给一句话加标记：[n:禁止] [t:检查前2小时] [i:身份证]
+function tag(s) {
+  s = s.replace(/\[/g, "【").replace(/\]/g, "】");
+  const spans = [];
+  const add = (re, kind) => { for (const m of s.matchAll(re)) if (m[0].trim()) spans.push({ start: m.index, end: m.index + m[0].length, kind }); };
+  add(NEG_RE, "n");
+  RULES.time.forEach((re) => add(re, "t"));
+  add(ITEM_RE, "i");
+  spans.sort((a, b) => a.start - b.start || (b.end - b.start) - (a.end - a.start) || PRIORITY[a.kind] - PRIORITY[b.kind]);
+  let out = "", pos = 0;
+  for (const sp of spans) {
+    if (sp.start < pos) continue;
+    out += s.slice(pos, sp.start) + `[${sp.kind}:${s.slice(sp.start, sp.end)}]`;
+    pos = sp.end;
+  }
+  return out + s.slice(pos);
+}
+
+const splitSentences = (p) => p.match(/[^。！？；!?;]+[。！？；!?;]*/g) || [p];
+const isMinor = (s) => RULES.minor.some((w) => s.includes(w));
+
+function structure(paragraphs) {
+  const fix = (p) => Object.entries(RULES.fix).reduce((s, [wrong, right]) => s.split(wrong).join(right), p);
+  const ps = paragraphs.map((p) => fix(String(p).trim())).filter(Boolean);
+  const blocks = [];
+  let rest = ps;
+  const ti = ps.slice(0, 4).findIndex((p) => p.length <= 26 && RULES.title.some((w) => p.includes(w)));
+  if (ti >= 0) {
+    const before = ps.slice(0, ti);
+    before.filter((p) => p.length <= 30 && RULES.org.some((w) => p.includes(w))).forEach((p) => blocks.push({ org: p }));
+    blocks.push({ title: ps[ti] });
+    rest = before.filter((p) => !(p.length <= 30 && RULES.org.some((w) => p.includes(w)))).concat(ps.slice(ti + 1));
+  }
+  for (const p of rest) {
+    if (p.length <= 20 && RULES.heading.test(p)) blocks.push({ h: p });
+    else blocks.push({ p: splitSentences(p).map((s) => (isMinor(s) ? "~" : "") + tag(s)) });
+  }
+  return blocks;
+}
+
+// ================= 渲染：分词，每个词一个元素 =================
+const KIND = { n: "neg", t: "time", i: "item" };
+const seger = "Segmenter" in Intl ? new Intl.Segmenter("zh", { granularity: "word" }) : null;
+const segments = (str) => seger ? [...seger.segment(str)]
+  : [...str].map((c) => ({ segment: c, isWordLike: /[\p{L}\p{N}]/u.test(c) }));
+const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+function sentence(raw, index) {
+  const lo = raw.startsWith("~");
+  if (lo) raw = raw.slice(1);
+  const key = !lo && raw.includes("[n:");
+  const toks = [];
+  let pre = "";
+  // 标点并入前一个词（避免出现在行首），左括号并入后一个词
+  const plain = (str) => {
+    for (const { segment: s, isWordLike } of segments(str)) {
+      if (!isWordLike) {
+        if (/^[（《“「(【]+$/.test(s)) { pre += s; continue; }
+        if (toks.length) { toks[toks.length - 1].tail += s; continue; }
+      }
+      toks.push({ pre, text: s, kind: "", tail: "" });
+      pre = "";
+    }
+  };
+  const re = /\[(n|t|i):([^\]]+)\]/g;
+  let last = 0, m;
+  while ((m = re.exec(raw))) {
+    plain(raw.slice(last, m.index));
+    toks.push({ pre, text: m[2], kind: KIND[m[1]], tail: "" });
+    pre = "";
+    last = re.lastIndex;
+  }
+  plain(raw.slice(last));
+  const html = toks.map((t) => t.kind
+    ? `<span class="w k ${t.kind}">${esc(t.pre)}<span class="mk">${esc(t.text)}</span>${esc(t.tail)}</span>`
+    : `<span class="w">${esc(t.pre + t.text + t.tail)}</span>`).join("");
+  const data = index === undefined ? "" : ` data-i="${index}"`;
+  return `<span class="s${lo ? " lo" : ""}${key ? " key" : ""}"${data}>${html}</span>`;
+}
+
+let words = [], xTo = [], yTo = [];
+function render(blocks) {
+  let head = "", body = "", index = 0;
+  for (const b of blocks) {
+    if (b.org) head += `<p class="d-org">${sentence("~" + b.org)}</p>`;
+    else if (b.title) head += `<h1 class="d-title">${sentence(b.title)}</h1>`;
+    else if (b.h) body += `<h2 class="d-h">${sentence(b.h)}</h2>`;
+    else body += `<p class="d-p">${b.p.map((s) => sentence(s, index++)).join("")}</p>`;
+  }
+  doc.innerHTML = (head ? `<header class="d-head">${head}</header>` : "") + body;
+  words = [...doc.querySelectorAll(".w")];
+  xTo = words.map((w) => gsap.quickTo(w, "x", { duration: 0.42, ease: "power3.out" }));
+  yTo = words.map((w) => gsap.quickTo(w, "y", { duration: 0.42, ease: "power3.out" }));
+}
+
+// 给 App 的摘要（清单、提醒会用到）
+function summary(blocks) {
+  const strip = (s) => s.replace(/^~/, "").replace(/\[(?:n|t|i):([^\]]+)\]/g, "$1");
+  const tags = (s) => [...s.matchAll(/\[(n|t|i):([^\]]+)\]/g)].map((m) => ({ kind: KIND[m[1]], text: m[2] }));
+  const sections = [];
+  let cur = { heading: "", sentences: [] }, index = 0;
+  for (const b of blocks) {
+    if (b.h) { if (cur.sentences.length || cur.heading) sections.push(cur); cur = { heading: b.h, sentences: [] }; }
+    else if (b.p) b.p.forEach((s) => cur.sentences.push({
+      i: index++, text: strip(s), level: s.startsWith("~") ? "minor" : s.includes("[n:") ? "key" : "normal", tags: tags(s),
+    }));
+  }
+  if (cur.sentences.length || cur.heading) sections.push(cur);
+  return {
+    title: (blocks.find((b) => b.title) || {}).title || "",
+    org: (blocks.find((b) => b.org) || {}).org || "",
+    neg: doc.querySelectorAll(".k.neg").length,
+    time: doc.querySelectorAll(".k.time").length,
+    key: doc.querySelectorAll(".s.key").length,
+    sections,
+  };
+}
+
+// ================= 排版随滑块变化：每个词从旧位置滑到新位置 =================
+let ready = false, tNow = 0, marksOn = false, lastPop = 0, pendingT = null;
+function glide(change) {
+  if (!ready || RM) { change(); return; }
+  const before = words.map((w) => w.getBoundingClientRect());
+  const cur = words.map((w) => [gsap.getProperty(w, "x"), gsap.getProperty(w, "y")]);
+  change();
+  words.forEach((w, i) => {
+    const a = w.getBoundingClientRect();
+    const dx = before[i].left - a.left + cur[i][0];
+    const dy = before[i].top - a.top + cur[i][1];
+    if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) { xTo[i](0, dx); yTo[i](0, dy); }
+  });
+}
+
+function applyT(t) {
+  tNow = t;
+  const h = Math.min(1, Math.max(0, (t - 0.5) / 0.5));
+  const marks = t >= 0.75;
+  glide(() => {
+    document.documentElement.style.setProperty("--t", t);
+    document.documentElement.style.setProperty("--h", h);
+    doc.classList.toggle("sans", t >= 0.25);
+    doc.classList.toggle("lines", t >= 0.5);
+    doc.classList.toggle("marks", marks);
+  });
+  if (marks && !marksOn && ready) popMarks();
+  marksOn = marks;
+}
+// 滑块每帧可能调用多次，合并到下一帧执行
+function setT(t) {
+  if (pendingT === null) requestAnimationFrame(() => { applyT(pendingT); pendingT = null; });
+  pendingT = Math.min(1, Math.max(0, +t || 0));
+}
+
+// ================= 识别动画：扫光、禁止词闪现、跨入「标出重点」时弹出 =================
+function lightSweep(dur) {
+  if (RM) return Promise.resolve();
+  return gsap.fromTo(sweepEl, { y: -260, autoAlpha: 1 }, { y: innerHeight, duration: dur, ease: "power1.inOut",
+    onComplete: () => gsap.set(sweepEl, { autoAlpha: 0 }) }).then(() => {});
+}
+function showFound() {
+  doc.querySelectorAll(".k.neg .mk").forEach((m, i) => {
+    gsap.delayedCall(i * 0.12, () => m.classList.add("found"));
+    gsap.delayedCall(1.6 + i * 0.12, () => m.classList.remove("found"));
+  });
+}
+function popMarks() {
+  const now = performance.now();
+  if (now - lastPop < 1200 || RM) return;
+  lastPop = now;
+  lightSweep(0.9);
+  gsap.fromTo(doc.querySelectorAll(".k.neg"), { scale: 1.35 }, { scale: 1, duration: 0.7, ease: "back.out(3)", stagger: 0.07, delay: 0.15 });
+}
+
+// ================= 对外接口 =================
+async function load(data) {
+  data = data || {};
+  const blocks = structure(data.paragraphs || []);
+  ready = false;
+  gsap.killTweensOf(words);
+  window.scrollTo(0, 0);
+  if (!blocks.some((b) => b.p)) { doc.innerHTML = ""; post({ type: "analyzed", empty: true }); return; }
+  render(blocks);
+  applyT(tNow);
+  ready = true;
+  const info = summary(blocks);
+  if (data.animate) { await lightSweep(1.5); showFound(); }
+  post({ type: "analyzed", empty: false, ...info });
+}
+function locate(text) {
+  const s = [...doc.querySelectorAll(".s")].find((el) => el.textContent.includes(text));
+  if (!s) return;
+  s.classList.add("show");
+  s.scrollIntoView({ behavior: RM ? "auto" : "smooth", block: "center" });
+  s.classList.remove("ping"); void s.offsetWidth; s.classList.add("ping");
+}
+// 朗读时高亮正在读的句子；-1 表示清除
+function highlight(i) {
+  doc.querySelectorAll(".s.reading").forEach((el) => el.classList.remove("reading"));
+  const s = doc.querySelector(`.s[data-i="${i}"]`);
+  if (!s) return;
+  s.classList.add("reading");
+  s.scrollIntoView({ behavior: RM ? "auto" : "smooth", block: "center" });
+}
+window.qingdu = {
+  load,
+  highlight,
+  loadSample: (opts) => load({ paragraphs: SAMPLE, ...(opts || {}) }),
+  setT,
+  locate,
+};
+
+// 次要句点一下可以恢复显示
+doc.addEventListener("click", (e) => {
+  const s = e.target.closest(".s.lo");
+  if (s && doc.classList.contains("lines")) s.classList.toggle("show");
+});
+
+// ================= 浏览器调试模式 =================
+if (!IN_APP) {
+  $("#dev").hidden = false;
+  const range = $("#devRange"), paste = $("#paste"), text = $("#pasteText");
+  range.addEventListener("input", () => setT(range.value));
+  $("#devSample").addEventListener("click", () => window.qingdu.loadSample({ animate: true }));
+  $("#devPaste").addEventListener("click", () => { paste.hidden = false; text.focus(); });
+  $("#pasteCancel").addEventListener("click", () => { paste.hidden = true; });
+  $("#pasteGo").addEventListener("click", () => {
+    const raw = text.value.trim();
+    const paras = /\n\s*\n/.test(raw) ? raw.split(/\n\s*\n/).map((p) => p.replace(/\s*\n\s*/g, "")) : raw.split(/\n/);
+    paste.hidden = true;
+    window.qingdu.load({ paragraphs: paras, animate: true });
+  });
+  window.qingdu.loadSample({ animate: false });
+}
+post({ type: "ready" });
+</script>
+</body>
+</html>
